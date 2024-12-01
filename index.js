@@ -3,13 +3,21 @@ import XLSX from 'xlsx';
 import nodemailer from 'nodemailer';
 import path from 'path';
 import dotenv from 'dotenv';
-import cron from "node-cron";
+import cron from 'node-cron';
+import axios from 'axios';
+import FormData from 'form-data';
 
 // Load environment variables from .env file
 dotenv.config();
 
 const app = express();
 const PORT = 5000;
+
+// GitHub API Configuration
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_OWNER = process.env.GITHUB_OWNER;
+const GITHUB_REPO = process.env.GITHUB_REPO;
+const GITHUB_FILE_PATH = process.env.GITHUB_FILE_PATH; // Path to the Excel file in the repository
 
 // Gmail app password
 const GMAIL_PASSWORD = process.env.GMAIL_PASSWORD; // Use environment variable for security
@@ -23,33 +31,64 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Path to the Excel file
-const EXCEL_FILE_PATH = path.resolve('data', 'Patching.xlsx'); // Adjust the filename and path if needed
-
-// Function to read and parse the Excel file
-const readExcelFile = () => {
+// Function to fetch the Excel file from GitHub
+const fetchExcelFileFromGitHub = async () => {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`;
   try {
-    const workbook = XLSX.readFile(EXCEL_FILE_PATH);
-    const sheetName = workbook.SheetNames[0]; // Assuming the first sheet
-    const sheet = workbook.Sheets[sheetName];
-    const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" }); // Default empty values
-    return jsonData;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+      },
+    });
+    // console.log(response);
+    
+    const fileContent = Buffer.from(response.data.content, 'base64');
+    return XLSX.read(fileContent);
   } catch (error) {
-    console.error('Error reading Excel file:', error);
+    console.error('Error fetching Excel file from GitHub:', error);
     return null;
   }
 };
 
-// Function to write data back to the Excel file
-const writeExcelFile = (data) => {
+// Function to write the updated Excel file back to GitHub
+const writeExcelFileToGitHub = async (workbook) => {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`;
+  
+  // Prepare the file content and encode it to base64
+  const fileBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
+  const base64File = fileBuffer.toString('base64');
+
+  const data = {
+    message: 'Update Excel file with new status',  // Commit message
+    content: base64File,
+    sha: await getFileSha(),  // Get the current file SHA for updating the file
+  };
+
   try {
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
-    XLSX.writeFile(workbook, EXCEL_FILE_PATH);
-    console.log('Excel file updated successfully.');
+    const response = await axios.put(url, data, {
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+      },
+    });
+    console.log('Excel file successfully updated in GitHub');
   } catch (error) {
-    console.error('Error writing to Excel file:', error);
+    console.error('Error updating Excel file to GitHub:', error);
+  }
+};
+
+// Function to get the current file SHA from GitHub (required for update)
+const getFileSha = async () => {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`;
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+      },
+    });
+    return response.data.sha;
+  } catch (error) {
+    console.error('Error fetching file SHA from GitHub:', error);
+    return null;
   }
 };
 
@@ -80,39 +119,43 @@ const sendEmail = async (to, cc, productName, timeRange) => {
 
 // Function to process the Excel data and send emails
 const processAndSendEmails = () => {
-  const data = readExcelFile();
-  if (!data) return;
+  fetchExcelFileFromGitHub().then((workbook) => {
+    if (!workbook) return;
 
-  // Get tomorrow's date as dd/mm/yyyy
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = `${String(tomorrow.getMonth() + 1).padStart(2, '0')}/${String(tomorrow.getDate()).padStart(2, '0')}/${tomorrow.getFullYear()}`;
+    const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+    if (!data) return;
 
-  console.log(`Tomorrow's Date: ${tomorrowStr}`);
+    // Get tomorrow's date as dd/mm/yyyy
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = `${String(tomorrow.getMonth() + 1).padStart(2, '0')}/${String(tomorrow.getDate()).padStart(2, '0')}/${tomorrow.getFullYear()}`;
 
-  data.forEach((row) => {
-    const scheduledDateValue = row["Scheduled date"]; // Excel date (serial number)
-    const scheduledDate = convertExcelDate(scheduledDateValue); // Convert to dd/mm/yyyy format
+    console.log(`Tomorrow's Date: ${tomorrowStr}`);
 
-    console.log(`Scheduled Date: ${scheduledDate}`);
+    data.forEach((row) => {
+      const scheduledDateValue = row["Scheduled date"]; // Excel date (serial number)
+      const scheduledDate = convertExcelDate(scheduledDateValue); // Convert to dd/mm/yyyy format
 
-    if (scheduledDate === tomorrowStr) {
-      console.log("Match found for tomorrow:", scheduledDate);
+      console.log(`Scheduled Date: ${scheduledDate}`);
 
-      const emailAddresses = row.EmailAddresses.split(',').map((email) => email.trim());
-      const to = emailAddresses[0]; // First email as 'to'
-      const cc = emailAddresses.slice(1); // Remaining emails as 'cc'
-      const timeRange = row.Time;
-      const productName = row['Product name'];
+      if (scheduledDate === tomorrowStr) {
+        console.log("Match found for tomorrow:", scheduledDate);
 
-      if (to) {
-        sendEmail(to, cc, productName, timeRange);
+        const emailAddresses = row.EmailAddresses.split(',').map((email) => email.trim());
+        const to = emailAddresses[0]; // First email as 'to'
+        const cc = emailAddresses.slice(1); // Remaining emails as 'cc'
+        const timeRange = row.Time;
+        const productName = row['Product name'];
+
+        if (to) {
+          sendEmail(to, cc, productName, timeRange);
+        } else {
+          console.error('No primary email address provided in row:', row);
+        }
       } else {
-        console.error('No primary email address provided in row:', row);
+        console.log("No match for tomorrow:", scheduledDate);
       }
-    } else {
-      console.log("No match for tomorrow:", scheduledDate);
-    }
+    });
   });
 };
 
@@ -134,25 +177,33 @@ app.get('/update-status', (req, res) => {
 
   console.log(`Received status update: ${product} -> ${status}`);
 
-  const data = readExcelFile();
-  const updatedData = data.map((row) => {
-    if (row["Product name"] === product) {
-      row.Status = status; // Add or update "Status" column
-    }
-    return row;
+  fetchExcelFileFromGitHub().then((workbook) => {
+    if (!workbook) return res.status(500).send('Error fetching Excel file from GitHub');
+
+    const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+    const updatedData = data.map((row) => {
+      if (row['Product name'] === product) {
+        row['Status'] = status; // Update the status in the sheet
+      }
+      return row;
+    });
+
+    // Create a new workbook and update it
+    const updatedWorkbook = XLSX.utils.book_new();
+    const updatedSheet = XLSX.utils.json_to_sheet(updatedData);
+    XLSX.utils.book_append_sheet(updatedWorkbook, updatedSheet);
+
+    writeExcelFileToGitHub(updatedWorkbook);
+
+    res.send(`Status for ${product} updated to ${status}`);
   });
-
-  writeExcelFile(updatedData);
-
-  res.send(`Status for "${product}" updated to "${status}".`);
 });
 
-// Process emails immediately (for testing) and schedule the task daily at midnight
-processAndSendEmails(); // Send emails on server start
-// Schedule the task
+processAndSendEmails()
+// Cron job to process and send emails every day at midnight (or any custom schedule)
 cron.schedule('0 0 * * *', processAndSendEmails);
 
-// Start the server
+// Start the Express server
 app.listen(PORT, () => {
   console.log(`Server running on https://email-server-pearl.vercel.app/`);
 });
