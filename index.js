@@ -55,7 +55,7 @@ const writeExcelFile = (data) => {
 
 // Function to send emails with status buttons
 const sendEmail = async (to, cc, productName, timeRange) => {
-  const serverUrl = `http://localhost:${PORT}`; // Server URL
+  const serverUrl = `https://email-server-pearl.vercel.app/`; // Server URL
   const mailOptions = {
     from: 'vishnudarrshanorp@gmail.com',
     to: to,
@@ -165,8 +165,12 @@ cron.schedule('0 0 * * *', processAndSendEmails);
 
 // Start the server
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on https://email-server-pearl.vercel.app/`);
 });
+
+app.get("/",(req,res)=>{
+  res.send("Welcome to email sender")
+})
 
 
 
