@@ -94,7 +94,7 @@ const getFileSha = async () => {
 
 // Function to send emails with status buttons
 const sendEmail = async (to, cc, productName, timeRange) => {
-  const serverUrl = `https://email-server-pearl.vercel.app/`; // Server URL
+  const serverUrl = `http://localhost:${PORT}`; // Server URL
   const mailOptions = {
     from: process.env.GMAIL_USER, // Your Gmail address
     to: to,
