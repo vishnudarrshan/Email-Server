@@ -32,7 +32,19 @@ const readExcelFile = () => {
     const workbook = XLSX.readFile(EXCEL_FILE_PATH);
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+    let data = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+    // Filter out "__EMPTY" or similar keys
+    data = data.map(row => {
+      const filteredRow = {};
+      for (const key in row) {
+        if (key.trim() && !key.startsWith("__EMPTY")) {
+          filteredRow[key] = row[key];
+        }
+      }
+      return filteredRow;
+    });
+
     return data;
   } catch (error) {
     console.error('Error reading Excel file:', error.message);
@@ -40,11 +52,23 @@ const readExcelFile = () => {
   }
 };
 
+
 // Function to write data back to the Excel file
 const writeExcelFile = (data) => {
   try {
+    // Clean rows before writing
+    const cleanedData = data.map(row => {
+      const filteredRow = {};
+      for (const key in row) {
+        if (key.trim()) { // Exclude blank keys
+          filteredRow[key] = row[key];
+        }
+      }
+      return filteredRow;
+    });
+
     const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(data);
+    const worksheet = XLSX.utils.json_to_sheet(cleanedData);
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
     XLSX.writeFile(workbook, EXCEL_FILE_PATH);
     console.log('Excel file updated successfully.');
@@ -52,6 +76,7 @@ const writeExcelFile = (data) => {
     console.error('Error writing to Excel file:', error.message);
   }
 };
+
 
 // Function to send emails with status buttons
 const sendEmail = async (to, cc, productName, timeRange) => {
