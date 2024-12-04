@@ -125,46 +125,73 @@ const processAndSendEmails = () => {
     const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
     if (!data) return;
 
-    // Get tomorrow's date as dd/mm/yyyy
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = `${String(tomorrow.getMonth() + 1).padStart(2, '0')}/${String(tomorrow.getDate()).padStart(2, '0')}/${tomorrow.getFullYear()}`;
-
-    console.log(`Tomorrow's Date: ${tomorrowStr}`);
+    // Current date and time
+    const now = new Date();
 
     data.forEach((row) => {
       const scheduledDateValue = row["Scheduled date"]; // Excel date (serial number)
       const scheduledDate = convertExcelDate(scheduledDateValue); // Convert to dd/mm/yyyy format
+      const todayStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+console.log(todayStr);
 
-      console.log(`Scheduled Date: ${scheduledDate}`);
-
-      if (scheduledDate === tomorrowStr) {
-        console.log("Match found for tomorrow:", scheduledDate);
-
+      if (scheduledDate === todayStr) {
         const emailAddresses = row.EmailAddresses.split(',').map((email) => email.trim());
         const to = emailAddresses[0]; // First email as 'to'
         const cc = emailAddresses.slice(1); // Remaining emails as 'cc'
         const timeRange = row.Time;
         const productName = row['Product name'];
 
-        if (to) {
-          sendEmail(to, cc, productName, timeRange);
+        // Extract start time from the time range (e.g., "09:00 AM - 12:00 PM")
+        const timeMatch = timeRange.match(/^(\d{1,2}:\d{2}\s*[APap][Mm])/);
+
+        if (!timeMatch) {
+          console.error(`Invalid or missing time format in row:`, row);
+          return; // Skip this row
+        }
+
+        const startTime12Hour = timeMatch[1]; // Extracted start time in 12-hour format
+
+        // Convert 12-hour format to 24-hour format
+        const [time, period] = startTime12Hour.split(/\s+/);
+        const [hour, minute] = time.split(':').map(Number);
+        const startHour = period.toLowerCase() === 'pm' && hour < 12 ? hour + 12 : hour % 12;
+
+        // Construct the scheduledTime
+        const scheduledTime = new Date();
+        scheduledTime.setHours(startHour, minute, 0, 0);
+
+        // Calculate one hour before
+        const oneHourBefore = new Date(scheduledTime.getTime() - 60 * 60 * 1000);
+
+        console.log(`Now: ${now.toISOString()}`);
+        console.log(`Scheduled Time: ${scheduledTime.toISOString()}`);
+        console.log(`One Hour Before: ${oneHourBefore.toISOString()}`);
+
+        // Send email 1 hour before the scheduled time
+        if (now >= oneHourBefore && now < scheduledTime) {
+          if (to) {
+            sendEmail(to, cc, productName, timeRange);
+          } else {
+            console.error('No primary email address provided in row:', row);
+          }
         } else {
-          console.error('No primary email address provided in row:', row);
+          console.log("No email to be sent for row:", row);
         }
       } else {
-        console.log("No match for tomorrow:", scheduledDate);
+        console.log("Scheduled date does not match today's date:", scheduledDate);
+
       }
     });
   });
 };
+
 
 // Helper function to convert Excel serial date to dd/mm/yyyy
 const convertExcelDate = (serial) => {
   // Excel serial date starts from Jan 1, 1900
   const excelEpoch = new Date(1900, 0, 1);
   const adjustedDate = new Date(excelEpoch.getTime() + (serial - 2) * 24 * 60 * 60 * 1000); // Subtract 2 for Excel quirks
-  return `${String(adjustedDate.getDate()).padStart(2, '0')}/${String(adjustedDate.getMonth() + 1).padStart(2, '0')}/${adjustedDate.getFullYear()}`;
+  return `${String(adjustedDate.getMonth() + 1).padStart(2, '0')}/${String(adjustedDate.getDate()).padStart(2, '0')}/${adjustedDate.getFullYear()}`;
 };
 
 // Endpoint to handle status updates
