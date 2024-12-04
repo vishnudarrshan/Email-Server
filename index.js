@@ -89,9 +89,10 @@ const sendEmail = async (to, cc, productName, timeRange) => {
     html: `
       <p>The scheduled task for <b>${productName}</b> is planned at <b>${timeRange}</b> today.</p>
       <p>Choose the task status:</p>
-      <a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Completed">✔ Completed</a><br/>
+      <ul><a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Completed">✔ Completed</a><br/>
       <a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Deferred">↺ Deferred</a><br/>
       <a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Not Completed">✖ Not Completed</a>
+      <li></li>
     `,
   };
 
@@ -111,7 +112,7 @@ const processAndSendEmails = () => {
   const now = new Date();
   const todayStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
 
-  data.forEach((row) => {
+  data.forEach(async(row) => {
     const scheduledDateValue = row["Scheduled date"];
     let scheduledDate;
       if (typeof scheduledDateValue === 'number') {
@@ -162,7 +163,16 @@ const processAndSendEmails = () => {
 
       if (now >= oneHourBefore && now < scheduledTime) {
         if(messageSentStatus !== true) {
-          sendEmail(to, cc, productName, timeRange);
+          await sendEmail(to, cc, productName, timeRange);
+          const updatedData = data.map((row) => {
+            if (row["Product name"] === productName) {
+              row["MessageSent"] = true
+              
+            }
+            return row;
+          });
+        
+          writeExcelFile(updatedData);
         } else {
           console.log("Mail already sent");
         }
@@ -194,7 +204,7 @@ app.get('/update-status', (req, res) => {
   const updatedData = data.map((row) => {
     if (row["Product name"] === product) {
       row.Status = status;
-      row.MessageSent = true;
+      
     }
     return row;
   });
