@@ -113,13 +113,25 @@ const processAndSendEmails = () => {
 
   data.forEach((row) => {
     const scheduledDateValue = row["Scheduled date"];
-    const scheduledDate = convertExcelDate(scheduledDateValue);
+    let scheduledDate;
+      if (typeof scheduledDateValue === 'number') {
+        scheduledDate = convertExcelDate(scheduledDateValue);
+      } else if (typeof scheduledDateValue === 'string') {
+        scheduledDate = scheduledDateValue;
+      } else {
+        console.error('Unexpected date format:', scheduledDateValue);
+        return; 
+      }
+
 
     if (scheduledDate === todayStr) {
+      console.log("Matching");
+      
       const emailAddresses = row.EmailAddresses.split(',').map((email) => email.trim());
       const to = emailAddresses[0];
       const cc = emailAddresses.slice(1);
       const productName = row['Product name'];
+      const messageSentStatus = row['MessageSent']
 
       // Extract the start time from the range (e.g., "09:00 AM - 12:00 PM")
       const timeRange = row.Time;
@@ -149,7 +161,11 @@ const processAndSendEmails = () => {
       console.log(`One Hour Before: ${oneHourBefore.toISOString()}`);
 
       if (now >= oneHourBefore && now < scheduledTime) {
-        sendEmail(to, cc, productName, timeRange);
+        if(messageSentStatus !== true) {
+          sendEmail(to, cc, productName, timeRange);
+        } else {
+          console.log("Mail already sent");
+        }
       }
     }
   });
@@ -160,8 +176,9 @@ const processAndSendEmails = () => {
 const convertExcelDate = (serial) => {
   const excelEpoch = new Date(1900, 0, 1);
   const adjustedDate = new Date(excelEpoch.getTime() + (serial - 2) * 24 * 60 * 60 * 1000);
-  return `${String(adjustedDate.getMonth() + 1).padStart(2, '0')}/${String(adjustedDate.getDate()).padStart(2, '0')}/${adjustedDate.getFullYear()}`;
+  return `${String(adjustedDate.getDate()).padStart(2, '0')}/${String(adjustedDate.getMonth() + 1).padStart(2, '0')}/${adjustedDate.getFullYear()}`;
 };
+
 
 // Endpoint to handle status updates
 app.get('/update-status', (req, res) => {
@@ -177,6 +194,7 @@ app.get('/update-status', (req, res) => {
   const updatedData = data.map((row) => {
     if (row["Product name"] === product) {
       row.Status = status;
+      row.MessageSent = true;
     }
     return row;
   });
@@ -189,6 +207,11 @@ app.get('/update-status', (req, res) => {
 // Schedule the email processing task every minute to check for 1-hour logic
 processAndSendEmails()
 
+// Schedule the email processing task every minute
+cron.schedule('* * * * *', () => {
+  console.log('Running email processing task...');
+  processAndSendEmails();
+});
 
 // Start the server
 app.listen(PORT, () => {
