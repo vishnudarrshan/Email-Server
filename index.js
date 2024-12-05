@@ -89,10 +89,10 @@ const sendEmail = async (to, cc, productName, timeRange) => {
     html: `
       <p>The scheduled task for <b>${productName}</b> is planned at <b>${timeRange}</b> today.</p>
       <p>Choose the task status:</p>
-      <ul><a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Completed">✔ Completed</a><br/>
-      <a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Deferred">↺ Deferred</a><br/>
-      <a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Not Completed">✖ Not Completed</a>
-      <li></li>
+      <ul>
+      <li><a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Completed">✔ Completed</a><br/></li>
+      <li><a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Deferred">↺ Deferred</a><br/></li>
+      <li><a href="${serverUrl}/update-status?product=${encodeURIComponent(productName)}&status=Not Completed">✖ Not Completed</a></li>
     `,
   };
 
@@ -113,7 +113,7 @@ const processAndSendEmails = () => {
   const todayStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
 
   data.forEach(async(row) => {
-    const scheduledDateValue = row["Scheduled date"];
+    const scheduledDateValue = row["Patching_Run_Date"];
     let scheduledDate;
       if (typeof scheduledDateValue === 'number') {
         scheduledDate = convertExcelDate(scheduledDateValue);
@@ -128,14 +128,14 @@ const processAndSendEmails = () => {
     if (scheduledDate === todayStr) {
       console.log("Matching");
       
-      const emailAddresses = row.EmailAddresses.split(',').map((email) => email.trim());
+      const emailAddresses = row.Email_Addresses.split(',').map((email) => email.trim());
       const to = emailAddresses[0];
       const cc = emailAddresses.slice(1);
-      const productName = row['Product name'];
+      const productName = row['Phase'];
       const messageSentStatus = row['MessageSent']
 
       // Extract the start time from the range (e.g., "09:00 AM - 12:00 PM")
-      const timeRange = row.Time;
+      const timeRange = row.Scheduled_Down_Time;
       const timeMatch = timeRange.match(/^(\d{1,2}:\d{2}\s*[APap][Mm])/);
 
       if (!timeMatch) {
@@ -165,7 +165,7 @@ const processAndSendEmails = () => {
         if(messageSentStatus !== true) {
           await sendEmail(to, cc, productName, timeRange);
           const updatedData = data.map((row) => {
-            if (row["Product name"] === productName) {
+            if (row["Phase"] === productName) {
               row["MessageSent"] = true
               
             }
@@ -202,8 +202,8 @@ app.get('/update-status', (req, res) => {
   if (!data) return res.status(500).send('Error reading the Excel file.');
 
   const updatedData = data.map((row) => {
-    if (row["Product name"] === product) {
-      row.Status = status;
+    if (row["Phase"] === product) {
+      row.Patching_status= status;
       
     }
     return row;
